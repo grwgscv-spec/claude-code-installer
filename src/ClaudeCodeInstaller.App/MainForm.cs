@@ -23,6 +23,8 @@ public class MainForm : Form
     private readonly Label _progressLabel = new() { Text = "" };
     private InstallationEngine? _engine;
     private bool _installing;
+    private CancellationTokenSource? _cts;
+    private bool _closeAfterCancel;
 
     public MainForm()
     {
@@ -39,8 +41,18 @@ public class MainForm : Form
         _startButton.Click += async (_, _) => await StartInstallAsync();
 
         BuildLayout();
+        FormClosing += OnFormClosing;
         _launchButton.Click += LaunchClaude;
         Log("请填写 DeepSeek API Key 并选择模型，然后点击「开始安装」。");
+    }
+
+    private void OnFormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (!_installing) return;
+        e.Cancel = true;                 // block close while installing
+        _closeAfterCancel = true;        // close once the install finishes
+        _cts?.Cancel();
+        Log("正在取消安装…");
     }
 
     private void BuildLayout()
@@ -128,6 +140,8 @@ public class MainForm : Form
         _progressBar.Value = 0;
         _progressLabel.Text = "";
 
+        _cts = new CancellationTokenSource();
+
         var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         _engine = new InstallationEngine(new NodeInstaller(new DownloadHelper(), new ProcessRunner(), new PathManager()),
             new ClaudeInstaller(new ProcessRunner()),
@@ -135,7 +149,11 @@ public class MainForm : Form
             new ConfigWriter(), profile);
         _engine.Log += Log;
         _engine.Progress += p => _progressBar.Value = p;
-        _engine.StepStarted += (step, desc) => Log($"── {desc}");
+        _engine.StepStarted += (step, desc) =>
+        {
+            _progressLabel.Text = desc;
+            Log($"── {desc}");
+        };
         _engine.Finished += (message, success) =>
         {
             Log(success ? "==== 完成 ====" : "==== 失败 ====");
@@ -145,6 +163,14 @@ public class MainForm : Form
             _launchButton.Enabled = success;
             if (success) MessageBox.Show(message, "安装完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
             else MessageBox.Show(message, "安装未完成", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+            _cts?.Dispose();
+            _cts = null;
+            if (_closeAfterCancel)
+            {
+                _closeAfterCancel = false;
+                Close();          // _installing is now false, so FormClosing won't block
+            }
         };
 
         await _engine.RunAsync(new InstallOptions
@@ -152,7 +178,7 @@ public class MainForm : Form
             ApiKey = _apiKeyBox.Text.Trim(),
             Model = _modelBox.Text.Trim(),
             InstallCcSwitch = _ccSwitchCheck.Checked,
-        }, CancellationToken.None);
+        }, _cts.Token);
     }
 
     private void SetBusy(bool busy)
