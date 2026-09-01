@@ -24,3 +24,6 @@ Node.js → Claude CLI → cc-switch → DeepSeek 配置，全程免管理员。
 - **SmartScreen 提示**：未签名 exe 正常现象，点「更多信息 → 仍要运行」。
 - **cc-switch 装失败**：不影响核心使用（claude + DeepSeek 已配置好）。
 - **模型报错**：换成 `deepseek-chat` 再试；DeepSeek 兼容端点模型名以官方为准。
+- **如何卸载 / 撤销安装**：`npm uninstall -g @anthropic-ai/claude-code` 卸载 Claude CLI；
+  从系统环境变量 PATH 中删除 `%USERPROFILE%\.nodejs` 并删除该文件夹；
+  原 `%USERPROFILE%\.claude\settings.json` 已自动备份为 `.bak-时间戳`，可据此还原。
