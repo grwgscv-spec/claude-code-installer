@@ -15,15 +15,8 @@ public sealed class ClaudeInstaller : IClaudeInstaller
 
     public async Task<ClaudeInstallResult> EnsureClaudeAsync(string npmCmd, IProgress<string>? log, CancellationToken ct)
     {
-        var claudeCmd = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm", "claude.cmd");
-
-        var where = await _runner.RunAsync("where.exe", new[] { "claude" }, null, null, ct);
-        var alreadyInstalled = where.ExitCode == 0 && !string.IsNullOrWhiteSpace(where.StandardOutput);
-        if (alreadyInstalled && File.Exists(claudeCmd))
-        {
-            claudeCmd = where.StandardOutput.Trim().Split('\n')[0].Trim();
-        }
+        var whereFound = await FindClaudePathAsync(ct);
+        var alreadyInstalled = whereFound is not null;
 
         Exception? lastError = null;
         foreach (var registry in VersionInfo.NpmRegistries)
@@ -39,7 +32,10 @@ public sealed class ClaudeInstaller : IClaudeInstaller
                 if (result.ExitCode == 0)
                 {
                     log?.Report("Claude CLI 安装完成。");
-                    return new ClaudeInstallResult(alreadyInstalled, claudeCmd);
+                    // 权威路径：npm 实际装到哪就用哪（便携 Node 的全局前缀不是 %AppData%\npm）。
+                    // 安装后重新 `where claude`，其次取安装前 found，最后回退默认 AppData 路径。
+                    var finalPath = await FindClaudePathAsync(ct) ?? whereFound ?? DefaultClaudeCmd();
+                    return new ClaudeInstallResult(alreadyInstalled, finalPath);
                 }
                 lastError = new InvalidOperationException($"npm 退出码 {result.ExitCode}: {result.StandardError}");
             }
@@ -47,4 +43,15 @@ public sealed class ClaudeInstaller : IClaudeInstaller
         }
         throw lastError ?? new InvalidOperationException("npm 安装失败。");
     }
+
+    private async Task<string?> FindClaudePathAsync(CancellationToken ct)
+    {
+        var where = await _runner.RunAsync("where.exe", new[] { "claude" }, null, null, ct);
+        if (where.ExitCode == 0 && !string.IsNullOrWhiteSpace(where.StandardOutput))
+            return where.StandardOutput.Trim().Split('\n')[0].Trim();
+        return null;
+    }
+
+    private static string DefaultClaudeCmd() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm", "claude.cmd");
 }
