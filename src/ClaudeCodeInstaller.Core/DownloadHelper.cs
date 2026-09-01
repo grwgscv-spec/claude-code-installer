@@ -58,7 +58,7 @@ public sealed class DownloadHelper : IDownloadHelper
                     progress?.Report(new DownloadProgress(0, null, 0, $"{source} 失败: {ex.Message}"));
                     break;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     errors.Add($"{source} (尝试 {attempt}): {ex.Message}");
                     progress?.Report(new DownloadProgress(0, null, 0, $"{source} 失败: {ex.Message}"));

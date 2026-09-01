@@ -87,6 +87,23 @@ public class DownloadHelperTests
         finally { Directory.Delete(dir, true); }
     }
 
+    [Fact]
+    public async Task UserCancellation_PropagatesOperationCanceledException()
+    {
+        var handler = new FakeHttpHandler(FakeHttpHandler.Ok(new byte[] { 1 })) { ThrowWhenCancelled = true };
+        var helper = new DownloadHelper(handler);
+        var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var dir = TempDir();
+        try
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                helper.DownloadFirstAvailableAsync(
+                    new[] { "https://a.example/x" }, dir, "x", null, cts.Token));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
     private static HttpResponseMessage OkWithDroppingStream()
     {
         var content = new StreamContent(new DroppingReadStream());

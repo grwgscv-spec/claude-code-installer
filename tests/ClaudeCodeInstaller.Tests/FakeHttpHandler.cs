@@ -8,9 +8,15 @@ public sealed class FakeHttpHandler : HttpMessageHandler
     public FakeHttpHandler(params HttpResponseMessage[] responses) =>
         _responses = new Queue<HttpResponseMessage>(responses);
     public List<string> RequestedUrls { get; } = new();
+    public bool ThrowWhenCancelled { get; set; }
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
+        if (ct.IsCancellationRequested)
+        {
+            if (ThrowWhenCancelled) throw new OperationCanceledException(ct);
+            return Task.FromCanceled<HttpResponseMessage>(ct);
+        }
         RequestedUrls.Add(request.RequestUri!.ToString());
         var next = _responses.Count > 0 ? _responses.Dequeue() : NotFound();
         return Task.FromResult(next);
