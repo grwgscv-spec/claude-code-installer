@@ -26,7 +26,7 @@ public sealed class NodeInstaller : INodeInstaller
     {
         var nodeDir = Path.Combine(userProfileDir, ".nodejs");
         var ownNode = Path.Combine(nodeDir, "node.exe");
-        if (File.Exists(ownNode))
+        if (File.Exists(ownNode) && File.Exists(Path.Combine(nodeDir, "npm.cmd")))
         {
             log?.Report("检测到已安装的便携 Node，跳过安装。");
             return new NodeInstallResult(true, nodeDir, Path.Combine(nodeDir, "npm.cmd"));
@@ -37,8 +37,14 @@ public sealed class NodeInstaller : INodeInstaller
         if (where.ExitCode == 0 && !string.IsNullOrWhiteSpace(where.StandardOutput))
         {
             var found = where.StandardOutput.Trim().Split('\n')[0].Trim();
-            log?.Report($"检测到已有 Node: {found}，跳过安装。");
-            return new NodeInstallResult(true, Path.GetDirectoryName(found)!, Path.Combine(Path.GetDirectoryName(found)!, "npm.cmd"));
+            var foundDir = Path.GetDirectoryName(found)!;
+            if (File.Exists(Path.Combine(foundDir, "npm.cmd")))
+            {
+                log?.Report($"检测到已有 Node: {found}，跳过安装。");
+                return new NodeInstallResult(true, foundDir, Path.Combine(foundDir, "npm.cmd"));
+            }
+
+            log?.Report($"检测到 {found} 但缺少 npm.cmd，将重新下载便携 Node。");
         }
 
         log?.Report($"未检测到 Node，正在下载 Node {VersionInfo.NodeVersion}…");
@@ -65,6 +71,7 @@ public sealed class NodeInstaller : INodeInstaller
             Directory.Delete(inner, recursive: true);
         }
 
+        ct.ThrowIfCancellationRequested();
         _pathManager.AppendUserPath(nodeDir);
         log?.Report("Node 安装完成，已加入用户 PATH。");
         return new NodeInstallResult(false, nodeDir, Path.Combine(nodeDir, "npm.cmd"));

@@ -9,6 +9,7 @@ public class NodeInstallerTests
     private sealed class FakeProcessRunner : IProcessRunner
     {
         public int WhereExitCode { get; set; } = 1; // `where node` 默认找不到
+        public string FoundPath { get; set; } = "C:\\fake\\node\\node.exe";
         public List<(string FileName, IReadOnlyList<string> Args)> Calls { get; } = new();
 
         public Task<ProcessResult> RunAsync(string fileName, IReadOnlyList<string> args,
@@ -17,7 +18,7 @@ public class NodeInstallerTests
             Calls.Add((fileName, args));
             var isWhere = args.Contains("node") && fileName.EndsWith("where.exe");
             var exit = isWhere ? WhereExitCode : 0;
-            return Task.FromResult(new ProcessResult(exit, isWhere && WhereExitCode == 0 ? "C:\\fake\\node\\node.exe" : "", "", false));
+            return Task.FromResult(new ProcessResult(exit, isWhere && WhereExitCode == 0 ? FoundPath : "", "", false));
         }
     }
 
@@ -84,13 +85,71 @@ public class NodeInstallerTests
         Directory.CreateDirectory(profile);
         try
         {
-            var fakeProc = new FakeProcessRunner { WhereExitCode = 0 };
+            var sysNode = Path.Combine(profile, "sysnode");
+            Directory.CreateDirectory(sysNode);
+            await File.WriteAllTextAsync(Path.Combine(sysNode, "node.exe"), "x");
+            await File.WriteAllTextAsync(Path.Combine(sysNode, "npm.cmd"), "x");
+
+            var fakeProc = new FakeProcessRunner { WhereExitCode = 0, FoundPath = Path.Combine(sysNode, "node.exe") };
             var installer = new NodeInstaller(new FakeDownloader(profile + ".zip"), fakeProc, new FakePathManager());
 
             var result = await installer.EnsureNodeAsync(profile, null, CancellationToken.None);
 
             Assert.True(result.AlreadyInstalled);
-            Assert.Equal("C:\\fake\\node\\npm.cmd", result.NpmCmd); // 复用已存在 node 的 npm（同目录假设）
+            Assert.Equal(Path.Combine(sysNode, "npm.cmd"), result.NpmCmd);
+        }
+        finally { Directory.Delete(profile, true); }
+    }
+
+    [Fact]
+    public async Task NodeFoundButNpmMissing_FallsThroughToPortableInstall()
+    {
+        var profile = Path.Combine(Path.GetTempPath(), "node-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(profile);
+        var zip = CreateNodeZip(profile);
+        try
+        {
+            // where finds a node.exe in a dir that has no npm.cmd (C:\fake\node doesn't exist)
+            var fakeProc = new FakeProcessRunner { WhereExitCode = 0, FoundPath = "C:\\fake\\node\\node.exe" };
+            var fakePath = new FakePathManager();
+            var installer = new NodeInstaller(new FakeDownloader(zip), fakeProc, fakePath);
+
+            var result = await installer.EnsureNodeAsync(profile, null, CancellationToken.None);
+
+            Assert.False(result.AlreadyInstalled);
+            Assert.True(File.Exists(Path.Combine(profile, ".nodejs", "node.exe")));
+            Assert.True(File.Exists(Path.Combine(profile, ".nodejs", "npm.cmd")));
+        }
+        finally { Directory.Delete(profile, true); }
+    }
+
+    private static string CreateNodeZipWithInnerFolder(string dir)
+    {
+        var zipPath = Path.Combine(dir, "node.zip");
+        using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
+        foreach (var name in new[] { "node-v24.16.0-win-x64/node.exe", "node-v24.16.0-win-x64/npm.cmd" })
+        {
+            var entry = archive.CreateEntry(name);
+            entry.Open().Close();
+        }
+        return zipPath;
+    }
+
+    [Fact]
+    public async Task NodeZipWithInnerFolder_IsHoistedIntoNodeDir()
+    {
+        var profile = Path.Combine(Path.GetTempPath(), "node-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(profile);
+        var zip = CreateNodeZipWithInnerFolder(profile);
+        try
+        {
+            var installer = new NodeInstaller(new FakeDownloader(zip), new FakeProcessRunner { WhereExitCode = 1 }, new FakePathManager());
+            var result = await installer.EnsureNodeAsync(profile, null, CancellationToken.None);
+            Assert.False(result.AlreadyInstalled);
+            Assert.True(File.Exists(Path.Combine(profile, ".nodejs", "node.exe")));
+            Assert.True(File.Exists(Path.Combine(profile, ".nodejs", "npm.cmd")));
+            // inner folder must be gone
+            Assert.DoesNotContain(Directory.GetDirectories(Path.Combine(profile, ".nodejs")), d => d.Contains("node-v24"));
         }
         finally { Directory.Delete(profile, true); }
     }
