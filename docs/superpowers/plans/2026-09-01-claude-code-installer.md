@@ -1445,29 +1445,36 @@ public sealed class CcSwitchInstaller : ICcSwitchInstaller
     {
         var tmp = Path.Combine(Path.GetTempPath(), "claude-code-installer");
 
-        // 策略 1：GitHub API 获取最新版资产 URL
+        // 策略 1：GitHub API 解析最新版资产 URL
         var assetUrl = await TryResolveLatestFromApiAsync(log, ct);
-
-        // 策略 2：固定版本经镜像下载
-        if (assetUrl is null)
+        if (assetUrl is not null)
         {
-            log?.Report("GitHub API 不可用，改用固定版本镜像下载。");
-            var sources = VersionInfo.CcSwitchMirrors
-                .Select(VersionInfo.PinnedCcSwitchUrl)
-                .ToList();
-            assetUrl = sources[0];
+            var fileName = Path.GetFileName(new Uri(assetUrl).AbsolutePath);
             try
             {
-                return await DownloadAndInstallAsync(sources, tmp, VersionInfo.CcSwitchPinnedAsset, log, ct);
+                return await DownloadAndInstallAsync(new[] { assetUrl }, tmp, fileName, log, ct);
             }
             catch (DownloadException ex)
             {
-                throw new InvalidOperationException("cc-switch 下载失败（已尝试所有镜像）。\n" + ex.Message);
+                // 最新版资产下载失败也要回退镜像，不能直接抛错
+                log?.Report($"最新版下载失败，改用固定版本镜像回退: {ex.Message}");
             }
         }
+        else
+        {
+            log?.Report("GitHub API 不可用，改用固定版本镜像下载。");
+        }
 
-        var fileName = Path.GetFileName(new Uri(assetUrl).AbsolutePath);
-        return await DownloadAndInstallAsync(new[] { assetUrl }, tmp, fileName, log, ct);
+        // 策略 2：固定版本经镜像下载（回退）
+        var sources = VersionInfo.CcSwitchMirrors.Select(VersionInfo.PinnedCcSwitchUrl).ToList();
+        try
+        {
+            return await DownloadAndInstallAsync(sources, tmp, VersionInfo.CcSwitchPinnedAsset, log, ct);
+        }
+        catch (DownloadException ex)
+        {
+            throw new InvalidOperationException("cc-switch 下载失败（已尝试所有镜像）。\n" + ex.Message);
+        }
     }
 
     private async Task<string?> TryResolveLatestFromApiAsync(IProgress<string>? log, CancellationToken ct)
