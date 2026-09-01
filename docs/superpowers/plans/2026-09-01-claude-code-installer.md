@@ -269,9 +269,10 @@ public static class VersionInfo
     // cc-switch（经典版，farion1231/cc-switch）
     public const string CcSwitchRepo = "farion1231/cc-switch";
     public const string CcSwitchApiUrl = "https://api.github.com/repos/farion1231/cc-switch/releases/latest";
-    // 固定版本兜底：换版本时改这里 + 下面的资产名。实现时确认实际 tag 与资产名。
-    public const string CcSwitchPinnedTag = "v0.3.1";
-    public const string CcSwitchPinnedAsset = "cc-switch_0.3.1_x64-setup.exe";
+    // 固定版本兜底：换版本时改这里 + 下面的资产名。真实资产命名格式为
+    // `CC-Switch-{版本}-Windows.msi`（x64；arm64 用 -arm64.msi）。
+    public const string CcSwitchPinnedTag = "v3.20.1";
+    public const string CcSwitchPinnedAsset = "CC-Switch-v3.20.1-Windows.msi";
     public static readonly string[] CcSwitchMirrors =
     {
         "https://mirror.ghproxy.com/",
@@ -1444,7 +1445,9 @@ public sealed class CcSwitchInstaller : ICcSwitchInstaller
             var asset = assets?.FirstOrDefault(a =>
             {
                 var name = a?["name"]?.GetValue<string>();
-                return name is not null && (name.EndsWith(".msi") || name.EndsWith("-setup.exe"));
+                return name is not null
+                    && name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)
+                    && !name.Contains("arm64", StringComparison.OrdinalIgnoreCase);
             });
             var url = asset?["browser_download_url"]?.GetValue<string>();
             if (url is not null) log?.Report($"已解析 cc-switch 最新版资产: {url}");
