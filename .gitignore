@@ -486,3 +486,6 @@ $RECYCLE.BIN/
 # The dotnet default gitignore has "*.app" (macOS bundle) which would ignore
 # the WinForms project directory "ClaudeCodeInstaller.App". Re-include it.
 !src/ClaudeCodeInstaller.App/
+
+# Publish output from build.ps1
+dist/
