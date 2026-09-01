@@ -16,4 +16,10 @@ public class VersionInfoTests
     [Fact]
     public void NodeMirrors_Prefer_Npmmirror() =>
         Assert.StartsWith("https://npmmirror.com", VersionInfo.NodeZipSources[0]);
+
+    [Fact]
+    public void PinnedCcSwitchUrl_ComposesMirrorPrefixWithGithubUrl() =>
+        Assert.Equal(
+            "https://mirror.ghproxy.com/https://github.com/farion1231/cc-switch/releases/download/v3.20.1/CC-Switch-v3.20.1-Windows.msi",
+            VersionInfo.PinnedCcSwitchUrl("https://mirror.ghproxy.com/"));
 }
