@@ -16,7 +16,7 @@ public sealed class InstallationEngine
     private readonly ICcSwitchInstaller _ccSwitch;
     private readonly IConfigWriter _config;
     private readonly string _userProfileDir;
-    private readonly IProcessRunner _verifyRunner = new ProcessRunner();
+    private readonly IProcessRunner _verifyRunner;
 
     public event Action<InstallStepId, string>? StepStarted;
     public event Action<string>? Log;
@@ -24,13 +24,14 @@ public sealed class InstallationEngine
     public event Action<string, bool>? Finished;
 
     public InstallationEngine(INodeInstaller node, IClaudeInstaller claude, ICcSwitchInstaller ccSwitch,
-        IConfigWriter config, string userProfileDir)
+        IConfigWriter config, string userProfileDir, IProcessRunner? verifyRunner = null)
     {
         _node = node;
         _claude = claude;
         _ccSwitch = ccSwitch;
         _config = config;
         _userProfileDir = userProfileDir;
+        _verifyRunner = verifyRunner ?? new ProcessRunner();
     }
 
     public async Task RunAsync(InstallOptions options, CancellationToken ct = default)
@@ -57,8 +58,9 @@ public sealed class InstallationEngine
                 try
                 {
                     await _ccSwitch.EnsureCcSwitchAsync(log, ct);
+                    ccSwitchMessage = "已安装 cc-switch。";
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     ccSwitchMessage = "cc-switch 安装失败（已跳过，不影响使用）: " + ex.Message;
                     Log?.Invoke(ccSwitchMessage);
@@ -104,6 +106,9 @@ public sealed class InstallationEngine
             var r = await _verifyRunner.RunAsync(claudeCmd, new[] { "--version" }, null, null, ct);
             return r.ExitCode == 0 ? r.StandardOutput.Trim() : "";
         }
-        catch { return ""; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return "";
+        }
     }
 }
