@@ -1104,19 +1104,27 @@ public sealed class NodeInstaller : INodeInstaller
     {
         var nodeDir = Path.Combine(userProfileDir, ".nodejs");
         var ownNode = Path.Combine(nodeDir, "node.exe");
-        if (File.Exists(ownNode))
+        var ownNpm = Path.Combine(nodeDir, "npm.cmd");
+        if (File.Exists(ownNode) && File.Exists(ownNpm))
         {
             log?.Report("检测到已安装的便携 Node，跳过安装。");
-            return new NodeInstallResult(true, nodeDir, Path.Combine(nodeDir, "npm.cmd"));
+            return new NodeInstallResult(true, nodeDir, ownNpm);
         }
 
-        // 检查系统其它位置的 node（含 `where node`）
+        // 检查系统其它位置的 node（含 `where node`）。注意：必须确认 npm.cmd 同目录存在，
+        // 否则返回的 NpmCmd 会让后续 npm 步骤失败——npm.cmd 缺失时改装便携版。
         var where = await _runner.RunAsync("where.exe", new[] { "node" }, null, null, ct);
         if (where.ExitCode == 0 && !string.IsNullOrWhiteSpace(where.StandardOutput))
         {
             var found = where.StandardOutput.Trim().Split('\n')[0].Trim();
-            log?.Report($"检测到已有 Node: {found}，跳过安装。");
-            return new NodeInstallResult(true, Path.GetDirectoryName(found)!, Path.Combine(Path.GetDirectoryName(found)!, "npm.cmd"));
+            var foundDir = Path.GetDirectoryName(found)!;
+            var foundNpm = Path.Combine(foundDir, "npm.cmd");
+            if (File.Exists(foundNpm))
+            {
+                log?.Report($"检测到已有 Node: {found}，跳过安装。");
+                return new NodeInstallResult(true, foundDir, foundNpm);
+            }
+            log?.Report($"检测到 Node 但缺少 npm.cmd，改装便携版。");
         }
 
         log?.Report($"未检测到 Node，正在下载 Node {VersionInfo.NodeVersion}…");
@@ -1143,6 +1151,7 @@ public sealed class NodeInstaller : INodeInstaller
             Directory.Delete(inner, recursive: true);
         }
 
+        ct.ThrowIfCancellationRequested();
         _pathManager.AppendUserPath(nodeDir);
         log?.Report("Node 安装完成，已加入用户 PATH。");
         return new NodeInstallResult(false, nodeDir, Path.Combine(nodeDir, "npm.cmd"));
