@@ -14,9 +14,11 @@ public sealed class PathManager : IPathManager
     public void AppendUserPath(string dir)
     {
         var current = GetUserPath();
+        var normalized = dir.TrimEnd(Path.DirectorySeparatorChar);
         var entries = current.Split(';', StringSplitOptions.RemoveEmptyEntries);
-        if (entries.Contains(dir, StringComparer.OrdinalIgnoreCase)) return;
-        var updated = string.IsNullOrEmpty(current) ? dir : current + ";" + dir;
+        if (entries.Any(e => e.TrimEnd(Path.DirectorySeparatorChar).Equals(normalized, StringComparison.OrdinalIgnoreCase)))
+            return;
+        var updated = string.IsNullOrEmpty(current) ? normalized : current.TrimEnd(';') + ";" + normalized;
         Environment.SetEnvironmentVariable("Path", updated, EnvironmentVariableTarget.User);
     }
 }

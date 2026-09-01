@@ -49,4 +49,28 @@ public class ProcessRunnerTests
             Environment.SetEnvironmentVariable("Path", before, EnvironmentVariableTarget.User);
         }
     }
+
+    [Fact]
+    public async Task OutputProgress_ReceivesStdoutAndStderrLines()
+    {
+        var runner = new ProcessRunner();
+        var lines = new List<string>();
+        await runner.RunAsync("cmd.exe", new[] { "/c", "echo out1 & echo err1 1>&2 & echo out2" }, null,
+            new Progress<string>(lines.Add), CancellationToken.None);
+        var trimmed = lines.Select(l => l.Trim()).ToList();
+        Assert.Contains("out1", trimmed);
+        Assert.Contains("err1", trimmed);
+        Assert.Contains("out2", trimmed);
+    }
+
+    [Fact]
+    public async Task Cancellation_ThrowsAndKillsChild()
+    {
+        var runner = new ProcessRunner();
+        using var cts = new CancellationTokenSource();
+        var task = runner.RunAsync("cmd.exe", new[] { "/c", "ping -t 127.0.0.1" }, null, null, cts.Token);
+        await Task.Delay(300);
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+    }
 }

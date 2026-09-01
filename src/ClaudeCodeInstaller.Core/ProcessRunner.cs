@@ -30,12 +30,31 @@ public sealed class ProcessRunner : IProcessRunner
         process.Start();
 
         var stdoutTask = ReadLinesAsync(process.StandardOutput, output, ct);
-        var stderrTask = ReadLinesAsync(process.StandardError, null, ct);
+        var stderrTask = ReadLinesAsync(process.StandardError, output, ct);
 
-        await process.WaitForExitAsync(ct).ConfigureAwait(false);
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-        return new ProcessResult(process.ExitCode, stdout, stderr, ct.IsCancellationRequested);
+        try
+        {
+            await process.WaitForExitAsync(ct).ConfigureAwait(false);
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
+            return new ProcessResult(process.ExitCode, stdout, stderr, ct.IsCancellationRequested);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKillProcessTree(process);
+            try { await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false); }
+            catch { /* reads cancelled; ignore */ }
+            throw;
+        }
+    }
+
+    private static void TryKillProcessTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
+        catch { /* already exited or access denied — best effort */ }
     }
 
     private static async Task<string> ReadLinesAsync(StreamReader reader, IProgress<string>? output, CancellationToken ct)
