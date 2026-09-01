@@ -440,6 +440,7 @@ public sealed class DownloadHelper : IDownloadHelper
 {
     private const int AttemptsPerSource = 2;
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan AttemptTimeout = TimeSpan.FromMinutes(10); // 每次尝试的总超时，防止连接卡死无限等待
     private readonly HttpClient _client;
 
     public DownloadHelper(HttpMessageHandler? handler = null)
@@ -461,9 +462,11 @@ public sealed class DownloadHelper : IDownloadHelper
         {
             for (var attempt = 1; attempt <= AttemptsPerSource; attempt++)
             {
+                using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                attemptCts.CancelAfter(AttemptTimeout);
                 try
                 {
-                    return await DownloadFromAsync(source, destDir, fileName, progress, ct);
+                    return await DownloadFromAsync(source, destDir, fileName, progress, attemptCts.Token);
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
@@ -712,6 +715,15 @@ public sealed class PathManager : IPathManager
             return;
         var updated = string.IsNullOrEmpty(current) ? normalized : current.TrimEnd(';') + ";" + normalized;
         Environment.SetEnvironmentVariable("Path", updated, EnvironmentVariableTarget.User);
+
+        // 同步更新当前进程 PATH，让本次运行内派生的进程（where/npm/cmd）能看到新目录
+        var processPath = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.Process) ?? "";
+        if (!processPath.Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Any(e => e.TrimEnd(Path.DirectorySeparatorChar).Equals(normalized, StringComparison.OrdinalIgnoreCase)))
+        {
+            var pUpdated = string.IsNullOrEmpty(processPath) ? normalized : processPath.TrimEnd(';') + ";" + normalized;
+            Environment.SetEnvironmentVariable("Path", pUpdated, EnvironmentVariableTarget.Process);
+        }
     }
 }
 ```
@@ -1299,8 +1311,8 @@ public sealed class ClaudeInstaller : IClaudeInstaller
                 {
                     log?.Report("Claude CLI 安装完成。");
                     // 权威路径：npm 实际装到哪就用哪（便携 Node 的全局前缀不是 %AppData%\npm）。
-                    // 安装后重新 `where claude`，其次取安装前 found，最后回退默认 AppData 路径。
-                    var finalPath = await FindClaudePathAsync(ct) ?? whereFound ?? DefaultClaudeCmd();
+                    // 安装后重新 `where claude`，其次取安装前 found，再取便携 Node 全局目录（npmCmd 所在目录），最后回退默认 AppData 路径。
+                    var finalPath = await FindClaudePathAsync(ct) ?? whereFound ?? PortableClaudeCmd(npmCmd) ?? DefaultClaudeCmd();
                     return new ClaudeInstallResult(alreadyInstalled, finalPath);
                 }
                 lastError = new InvalidOperationException($"npm 退出码 {result.ExitCode}: {result.StandardError}");
@@ -1320,6 +1332,13 @@ public sealed class ClaudeInstaller : IClaudeInstaller
 
     private static string DefaultClaudeCmd() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm", "claude.cmd");
+
+    // 便携 Node 的 npm 全局目录就是 npmCmd 所在目录，claude.cmd 会装到这里
+    private static string? PortableClaudeCmd(string npmCmd)
+    {
+        var dir = Path.GetDirectoryName(npmCmd);
+        return dir is null ? null : Path.Combine(dir, "claude.cmd");
+    }
 }
 ```
 
@@ -1434,11 +1453,15 @@ public sealed class CcSwitchInstaller : ICcSwitchInstaller
 {
     private readonly IDownloadHelper _downloader;
     private readonly IProcessRunner _runner;
+    private readonly HttpClient _httpClient;
 
-    public CcSwitchInstaller(IDownloadHelper downloader, IProcessRunner runner)
+    public CcSwitchInstaller(IDownloadHelper downloader, IProcessRunner runner, HttpClient? httpClient = null)
     {
         _downloader = downloader;
         _runner = runner;
+        _httpClient = httpClient ?? new HttpClient();
+        _httpClient.Timeout = TimeSpan.FromSeconds(30); // api.github.com 被墙时快速回退到镜像
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("ClaudeCodeInstaller/1.0");
     }
 
     public async Task<CcSwitchInstallResult> EnsureCcSwitchAsync(IProgress<string>? log, CancellationToken ct)
