@@ -1,3 +1,4 @@
+using System.Text;
 using ClaudeCodeInstaller.Core;
 using Xunit;
 
@@ -74,5 +75,42 @@ public class CcSwitchInstallerTests
         Assert.Contains("CC-Switch-v3.20.1-Windows.msi", handler.RequestedUrls[1]);
         Assert.Single(runner.Calls);
         Assert.Equal("msiexec.exe", runner.Calls[0].FileName);
+    }
+
+    [Fact]
+    public async Task AllMirrorsFail_ThrowsInvalidOperationException()
+    {
+        // GitHub API 404 → 镜像1/2/3 全部 404。
+        var handler = new FakeHttpHandler(
+            FakeHttpHandler.NotFound(),  // API
+            FakeHttpHandler.NotFound(),  // mirror 1
+            FakeHttpHandler.NotFound(),  // mirror 2
+            FakeHttpHandler.NotFound()); // mirror 3
+        var runner = new FakeProcessRunner();
+        var installer = new CcSwitchInstaller(new DownloadHelper(handler), runner, new HttpClient(handler));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            installer.EnsureCcSwitchAsync(null, CancellationToken.None));
+
+        Assert.Contains("镜像", ex.Message);
+        foreach (var m in VersionInfo.CcSwitchMirrors)
+            Assert.Contains(handler.RequestedUrls, u => u.StartsWith(m));
+    }
+
+    [Fact]
+    public async Task LatestAssetDownloadFails_FallsBackToPinnedMirror()
+    {
+        // GitHub API 解析出最新资产 → 最新资产下载 404 → 首个镜像下载成功。
+        var handler = new FakeHttpHandler(
+            FakeHttpHandler.Ok(Encoding.UTF8.GetBytes(FakeReleaseJson)), // API resolves latest
+            FakeHttpHandler.NotFound(),                                  // latest asset download fails
+            FakeHttpHandler.Ok(new byte[] { 1, 2, 3 }));                 // first mirror succeeds
+        var runner = new FakeProcessRunner();
+        var installer = new CcSwitchInstaller(new DownloadHelper(handler), runner, new HttpClient(handler));
+
+        var result = await installer.EnsureCcSwitchAsync(null, CancellationToken.None);
+
+        Assert.True(result.Installed);
+        Assert.Contains(handler.RequestedUrls, u => u.StartsWith("https://mirror.ghproxy.com/"));
     }
 }

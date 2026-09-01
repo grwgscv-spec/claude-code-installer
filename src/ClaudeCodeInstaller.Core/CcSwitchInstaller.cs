@@ -26,32 +26,40 @@ public sealed class CcSwitchInstaller : ICcSwitchInstaller
 
     public async Task<CcSwitchInstallResult> EnsureCcSwitchAsync(IProgress<string>? log, CancellationToken ct)
     {
-        var destDir = Path.Combine(Path.GetTempPath(), TempDirName);
+        var tmp = Path.Combine(Path.GetTempPath(), TempDirName);
 
-        // 策略 1：GitHub latest API 解析最新的非 arm64 .msi 资产。
-        var resolvedUrl = await TryResolveLatestFromApiAsync(ct);
-        if (resolvedUrl is not null)
+        // 策略 1：GitHub API 解析最新版资产 URL。
+        var assetUrl = await TryResolveLatestFromApiAsync(ct);
+        if (assetUrl is not null)
         {
-            log?.Report($"已解析 cc-switch 最新资产: {resolvedUrl}");
-            return await DownloadAndInstallAsync(resolvedUrl, destDir, log, ct);
+            var fileName = Path.GetFileName(new Uri(assetUrl).AbsolutePath);
+            if (string.IsNullOrEmpty(fileName)) fileName = VersionInfo.CcSwitchPinnedAsset;
+            log?.Report($"已解析 cc-switch 最新资产: {assetUrl}");
+            try
+            {
+                return await DownloadAndInstallAsync(new[] { assetUrl }, tmp, fileName, log, ct);
+            }
+            catch (DownloadException ex)
+            {
+                log?.Report($"最新版下载失败，改用固定版本镜像回退: {ex.Message}");
+            }
+        }
+        else
+        {
+            log?.Report("GitHub API 不可用，改用固定版本镜像下载。");
         }
 
-        // 策略 2：GitHub API 失败，走镜像固定版本兜底。
-        log?.Report("GitHub API 不可用，回退到镜像固定版本下载…");
+        // 策略 2：固定版本经镜像下载（回退）。
         var sources = VersionInfo.CcSwitchMirrors.Select(VersionInfo.PinnedCcSwitchUrl).ToList();
-        string installerPath;
         try
         {
-            installerPath = await _downloader.DownloadFirstAvailableAsync(
-                sources, destDir, VersionInfo.CcSwitchPinnedAsset, null, ct);
+            return await DownloadAndInstallAsync(sources, tmp, VersionInfo.CcSwitchPinnedAsset, log, ct);
         }
         catch (DownloadException ex)
         {
             throw new InvalidOperationException(
-                $"cc-switch 在所有镜像下载后仍失败: {ex.Message}", ex);
+                $"cc-switch 下载失败（已尝试所有镜像）。\n{ex.Message}", ex);
         }
-
-        return await InstallAsync(installerPath, log, ct);
     }
 
     private async Task<string?> TryResolveLatestFromApiAsync(CancellationToken ct)
@@ -93,24 +101,12 @@ public sealed class CcSwitchInstaller : ICcSwitchInstaller
         return null;
     }
 
-    private async Task<CcSwitchInstallResult> DownloadAndInstallAsync(string url, string destDir,
-        IProgress<string>? log, CancellationToken ct)
+    private async Task<CcSwitchInstallResult> DownloadAndInstallAsync(IReadOnlyList<string> sources,
+        string destDir, string fileName, IProgress<string>? log, CancellationToken ct)
     {
-        var fileName = Path.GetFileName(new Uri(url).AbsolutePath);
-        if (string.IsNullOrEmpty(fileName)) fileName = VersionInfo.CcSwitchPinnedAsset;
-
-        string installerPath;
-        try
-        {
-            installerPath = await _downloader.DownloadFirstAvailableAsync(
-                new[] { url }, destDir, fileName, null, ct);
-        }
-        catch (DownloadException ex)
-        {
-            throw new InvalidOperationException(
-                $"cc-switch 资产下载失败: {ex.Message}", ex);
-        }
-
+        // 让底层 DownloadException 原样向上传播；由调用方决定如何包装/报告。
+        var installerPath = await _downloader.DownloadFirstAvailableAsync(
+            sources, destDir, fileName, null, ct);
         return await InstallAsync(installerPath, log, ct);
     }
 
@@ -120,7 +116,7 @@ public sealed class CcSwitchInstaller : ICcSwitchInstaller
         var ext = Path.GetExtension(installerPath);
         var isMsi = ext.Equals(".msi", StringComparison.OrdinalIgnoreCase);
 
-        log?.Report($"正在静默安装 cc-switch…");
+        log?.Report("正在静默安装 cc-switch…");
         ProcessResult result = isMsi
             ? await _runner.RunAsync("msiexec.exe",
                 new[] { "/i", installerPath, "/qn", "/norestart" }, null, log, ct)
