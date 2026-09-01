@@ -45,8 +45,12 @@ public class ProcessRunnerTests
         }
         finally
         {
-            // 还原测试污染的用户 PATH
             Environment.SetEnvironmentVariable("Path", before, EnvironmentVariableTarget.User);
+            // 恢复测试期间被同步改动的进程 PATH
+            var processPath = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.Process) ?? "";
+            var cleaned = string.Join(';', processPath.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .Where(e => !e.TrimEnd(Path.DirectorySeparatorChar).Equals("C:\\fake\\node", StringComparison.OrdinalIgnoreCase)));
+            Environment.SetEnvironmentVariable("Path", cleaned, EnvironmentVariableTarget.Process);
         }
     }
 

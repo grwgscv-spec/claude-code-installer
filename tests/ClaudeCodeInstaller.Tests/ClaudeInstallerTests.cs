@@ -85,6 +85,16 @@ public class ClaudeInstallerTests
     }
 
     [Fact]
+    public async Task FreshPortableInstall_ResolvesClaudeCmdFromNpmDir()
+    {
+        var fake = new FakeRunner { ClaudeExists = false }; // where 找不到任何 claude，安装前后皆无
+        var installer = new ClaudeInstaller(fake);
+        var result = await installer.EnsureClaudeAsync("C:\\Users\\x\\.nodejs\\npm.cmd", null, CancellationToken.None);
+        Assert.False(result.AlreadyInstalled);
+        Assert.Equal("C:\\Users\\x\\.nodejs\\claude.cmd", result.ClaudeCmd);
+    }
+
+    [Fact]
     public async Task FreshInstall_ReResolvesClaudeCmdAfterNpm()
     {
         // ClaudeExists is false at first (pre-install `where` finds nothing),

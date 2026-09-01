@@ -18,6 +18,7 @@ public interface IDownloadHelper
 public sealed class DownloadHelper : IDownloadHelper
 {
     private const int AttemptsPerSource = 2;
+    private static readonly TimeSpan AttemptTimeout = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(30);
     private readonly HttpClient _client;
 
@@ -40,12 +41,15 @@ public sealed class DownloadHelper : IDownloadHelper
         {
             for (var attempt = 1; attempt <= AttemptsPerSource; attempt++)
             {
+                using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                attemptCts.CancelAfter(AttemptTimeout);
                 try
                 {
-                    return await DownloadFromAsync(source, destDir, fileName, progress, ct);
+                    return await DownloadFromAsync(source, destDir, fileName, progress, attemptCts.Token);
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
+                    // 尝试级超时（非用户取消）→ 记为该源失败并重试
                     errors.Add($"{source} 超时 (尝试 {attempt})");
                     progress?.Report(new DownloadProgress(0, null, 0, $"{source} 超时，重试…"));
                 }

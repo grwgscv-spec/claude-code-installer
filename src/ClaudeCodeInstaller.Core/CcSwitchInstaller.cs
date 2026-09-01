@@ -21,6 +21,7 @@ public sealed class CcSwitchInstaller : ICcSwitchInstaller
         _downloader = downloader;
         _runner = runner;
         _httpClient = httpClient ?? new HttpClient();
+        _httpClient.Timeout = TimeSpan.FromSeconds(30);
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("ClaudeCodeInstaller/1.0");
     }
 

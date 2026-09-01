@@ -33,8 +33,10 @@ public sealed class ClaudeInstaller : IClaudeInstaller
                 {
                     log?.Report("Claude CLI 安装完成。");
                     // 权威路径：npm 实际装到哪就用哪（便携 Node 的全局前缀不是 %AppData%\npm）。
-                    // 安装后重新 `where claude`，其次取安装前 found，最后回退默认 AppData 路径。
-                    var finalPath = await FindClaudePathAsync(ct) ?? whereFound ?? DefaultClaudeCmd();
+                    // 安装后重新 `where claude`，其次取安装前 found，再次 npmCmd 所在目录
+                    // （便携 Node 的 npm 全局目录），最后回退默认 AppData 路径。
+                    var finalPath = await FindClaudePathAsync(ct) ?? whereFound
+                        ?? PortableClaudeCmd(npmCmd) ?? DefaultClaudeCmd();
                     return new ClaudeInstallResult(alreadyInstalled, finalPath);
                 }
                 lastError = new InvalidOperationException($"npm 退出码 {result.ExitCode}: {result.StandardError}");
@@ -50,6 +52,13 @@ public sealed class ClaudeInstaller : IClaudeInstaller
         if (where.ExitCode == 0 && !string.IsNullOrWhiteSpace(where.StandardOutput))
             return where.StandardOutput.Trim().Split('\n')[0].Trim();
         return null;
+    }
+
+    // 便携 Node 的 npm 全局目录就是 npmCmd 所在目录，claude.cmd 会装到这里
+    private static string? PortableClaudeCmd(string npmCmd)
+    {
+        var dir = Path.GetDirectoryName(npmCmd);
+        return dir is null ? null : Path.Combine(dir, "claude.cmd");
     }
 
     private static string DefaultClaudeCmd() =>
