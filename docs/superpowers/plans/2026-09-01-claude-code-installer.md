@@ -2029,7 +2029,13 @@ git commit -m "feat: full installer UI"
 $ErrorActionPreference = 'Stop'
 Write-Host "Publishing ClaudeCodeInstaller (win-x64 self-contained single file)..."
 dotnet publish src/ClaudeCodeInstaller.App -c Release -o dist
-Write-Host "Done: dist\ClaudeCodeInstaller.App.exe -> 重命名为 ClaudeCodeInstaller.exe 分发"
+$exe = "dist\ClaudeCodeInstaller.App.exe"
+if (Test-Path $exe) {
+    Move-Item -Force $exe "dist\ClaudeCodeInstaller.exe"
+    Write-Host "Done: dist\ClaudeCodeInstaller.exe"
+} else {
+    Write-Error "Publish output not found at $exe"
+}
 ```
 
 - [ ] **Step 2: 编写 README.md**
