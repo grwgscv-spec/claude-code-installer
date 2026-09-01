@@ -1,3 +1,4 @@
+using System.Net;
 using ClaudeCodeInstaller.Core;
 
 namespace ClaudeCodeInstaller.Tests;
@@ -60,5 +61,54 @@ public class DownloadHelperTests
             Assert.Contains("https://a.example", ex.Message);
         }
         finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public async Task TransientFailure_RetriesSameSourceBeforeFallingBack()
+    {
+        // First attempt dies mid-stream (transient connection drop); second attempt on
+        // the same source succeeds. The IOException must NOT propagate immediately.
+        var handler = new FakeHttpHandler(
+            OkWithDroppingStream(),
+            FakeHttpHandler.Ok(new byte[] { 7, 8, 9 }));
+        var helper = new DownloadHelper(handler);
+        var dir = TempDir();
+        try
+        {
+            var path = await helper.DownloadFirstAvailableAsync(
+                new[] { "https://a.example/node.zip", "https://b.example/node.zip" },
+                dir, "node.zip");
+            Assert.True(File.Exists(path));
+            Assert.Equal(3, new FileInfo(path).Length);
+            // Both requests went to source A (same source retried); never reached B.
+            Assert.All(handler.RequestedUrls, u => Assert.StartsWith("https://a.example", u));
+            Assert.Equal(2, handler.RequestedUrls.Count);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    private static HttpResponseMessage OkWithDroppingStream()
+    {
+        var content = new StreamContent(new DroppingReadStream());
+        content.Headers.ContentLength = 100;
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+    }
+
+    private sealed class DroppingReadStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => 100;
+        public override long Position { get => 0; set { } }
+        public override int Read(byte[] buffer, int offset, int count) => throw new IOException("connection dropped");
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            throw new IOException("connection dropped");
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            throw new IOException("connection dropped");
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => 0;
+        public override void SetLength(long value) { }
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }
